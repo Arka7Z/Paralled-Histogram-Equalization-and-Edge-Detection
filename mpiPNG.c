@@ -92,8 +92,10 @@ int main(int argc, char *argv[])
         png_byte color_type;
         png_byte bit_depth;
         png_bytep *row_pointers;
-
-        FILE *fp = fopen("input.png", "rb");
+        char *filename = "input.png";
+        if (argc > 1)
+        	filename = argv[1];
+        FILE *fp = fopen(filename, "rb");
         if(!fp) abort();
         png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
         if(!png) abort();
@@ -124,6 +126,10 @@ int main(int argc, char *argv[])
             color_type == PNG_COLOR_TYPE_PALETTE)
             png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
 
+          if(color_type == PNG_COLOR_TYPE_GRAY ||
+		     color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
+		    png_set_gray_to_rgb(png);
+
         png_read_update_info(png, info);
 
         row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * height);
@@ -140,8 +146,8 @@ int main(int argc, char *argv[])
             png_bytep row = row_pointers[y];
             for(int x = 0; x < width; x++) 
             {
-                png_byte px = (row[x * 4]);
-                int val = (int) px;
+                png_bytep px = &(row[x * 4]);
+                int val =  round(0.3 * px[0] + 0.59 * px[1] + 0.11 * px[2]);
                 img[x * height + y] = val;
             }
         }
@@ -151,8 +157,7 @@ int main(int argc, char *argv[])
                 globalImg[j * width + i] = img[i * height + j];
         row = height;
         col = width;
-        maxGray = 255;
-        
+        maxGray = 255;        
     }
 
     /* Broadcast the image parameters i.e. maxGray, row size and column size*/
@@ -220,7 +225,6 @@ int main(int argc, char *argv[])
     if (rank == 0)
     {
         writePGM("histeql.pgm", globalImg, row, col, maxGray);
-        free(globalImg);
     }
 
     /* Apply sobel operator */
@@ -241,35 +245,38 @@ int main(int argc, char *argv[])
     
     int* localSobelResult = (int*)malloc(sendcounts[rank] * col * sizeof(int));
 
-    int sobelX[3][3] = { { -1, 0, 1 },
+    float sobelX[3][3] = { { -1, 0, 1 },
                           { -2, 0, 2 },
                           { -1, 0, 1 } };
 
-    int sobelY[3][3] = { { -1, -2, -1 },
+    float sobelY[3][3] = { { -1, -2, -1 },
                          { 0,  0,  0 },
                          { 1,  2,  1 } };
+    int rowInd = 0;
     for (int i = displs[rank]; i < displs[rank] + sendcounts[rank] && i < row; i++)
         for (int j = 0; j < col; j++)
     {
-        int sum, sumx, sumy;
+        int sum; 
+        float sumx = 0, sumy = 0;
         if (i == 0 || i == (row - 1) || j == 0 || j == (col - 1))
-            sum = 0;
+            sum = (sum > 255? 255 : (sum < 0? 0: sum));
         else
         {
             for (int r = -1; r <= 1; r++)
                 for (int c = -1; c <= 1; c++)
                 {
-                    sumx = globalImg[(i + r) * col + j] * sobelX[r + 1][c + 1];
-                    sumy = globalImg[(i + r) * col + j] * sobelY[r + 1][c + 1];;
+                    sumx += globalImg[(i + r) * col + j + c] * sobelX[r + 1][c + 1];
+                    sumy += globalImg[(i + r) * col + j + c] * sobelY[r + 1][c + 1];;
                 }
+            sum = (int)(sqrt(sumx * sumx + sumy * sumy));
+            sum = (sum > 255? 255 : (sum < 0? 0: sum));
         }
-        sum = (int) sqrt(sumx * sumx + sumy * sumy);
-        localSobelResult[i * col + j] = sum;
+        localSobelResult[(i - displs[rank]) * col + j] = sum;
         
     }
 
-    for (int i = 0; i < size)
-        sendcounts[rank] *= col;
+    for (int i = 0; i < size; i++)
+        sendcounts[i] *= col;
     sum = 0;
     for (int i = 0; i < size; i++) 
     {
@@ -282,7 +289,7 @@ int main(int argc, char *argv[])
 
     if (rank == 0)
         writePGM("final.pgm", globalImg, row, col, maxGray);
-
+    
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
     

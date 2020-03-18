@@ -1,8 +1,9 @@
-				#include <stdlib.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
 #include <mpi.h>
 #include <png.h>
+#include <ctype.h>
 
 #define HI(num) (((num) & 0x0000FF00) << 8) 
 #define LO(num) ((num) & 0x000000FF) 
@@ -19,7 +20,7 @@ void SkipComments(FILE *fp)
 {
     int ch;
     char line[100];
-    while ((ch = fgetc(fp)) != EOF && isspace(ch)) {
+    while ((ch = fgetc(fp)) != EOF && isspace((unsigned char)ch)) {
         ;
     }
  
@@ -326,7 +327,7 @@ int main(int argc, char *argv[])
     }
     if (rank == size - 1)
     {
-        for (int i = 1; i < tmpSendCounts[rank] / col - 1; i++)
+        for (int i = 1; i <= tmpSendCounts[rank] / col - 1; i++)
             for (int j = 0; j < col; j++)
         {
             int sum; 
@@ -348,28 +349,6 @@ int main(int argc, char *argv[])
         }
         for (int j = 0; j < col; j++)
             localSobelResult[(tmpSendCounts[rank] / col - 1) * col + j] = localImgSobel[tmpSendCounts[rank] + j];
-    }
-
-    for (int i = displs[rank]; i < displs[rank] + sendcounts[rank] && i < row; i++)
-        for (int j = 0; j < col; j++)
-    {
-        int sum; 
-        float sumx = 0, sumy = 0;
-        if (i == 0 || i == (row - 1) || j == 0 || j == (col - 1))
-            sum = (sum > 255? 255 : (sum < 0? 0: sum));
-        else
-        {
-            for (int r = -1; r <= 1; r++)
-                for (int c = -1; c <= 1; c++)
-                {
-                    sumx += localImgSobel[(i + r) * col + j + c] * sobelX[r + 1][c + 1];
-                    sumy += localImgSobel[(i + r) * col + j + c] * sobelY[r + 1][c + 1];;
-                }
-            sum = (int)(sqrt(sumx * sumx + sumy * sumy));
-            sum = (sum > 255? 255 : (sum < 0? 0: sum));
-        }
-        localSobelResult[(i - displs[rank]) * col + j] = sum;
-        
     }
 
     sum = 0;
